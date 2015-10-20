@@ -126,7 +126,6 @@ def process_revision_by_id(cursor, revid):
 
 def process_revisions(cursor, pageid, xmlrevs):
     for rev in xmlrevs.getElementsByTagName('rev'):
-        # count_revs += 1
         try:
             revid = rev.attributes['revid'].value
             timestamp = rev.attributes['timestamp'].value
