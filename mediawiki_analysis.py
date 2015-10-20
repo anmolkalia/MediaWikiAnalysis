@@ -29,21 +29,15 @@ from optparse import OptionParser
 import sys, traceback
 import MySQLdb
 import urllib2, urllib
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from wikianalysis.database import Base
+from sqlalchemy.sql import func
+
+from wikianalysis.database import wiki_pages_revs, wiki_pages, people
+
 from xml.dom.minidom import parseString
-
-def open_database(myuser, mypassword, mydb):
-    con = MySQLdb.Connect(host="127.0.0.1",
-                          port=3306,
-                          user=myuser,
-                          passwd=mypassword,
-                          db=mydb,
-                          charset='utf8')
-    # cursor = con.cursor()
-    # return cursor
-    return con
-
-def close_database(con):
-    con.close()
 
 def read_options():
     parser = OptionParser(usage="usage: %prog [options]",
@@ -92,53 +86,24 @@ def escape_string (message):
         message = message.replace("'", "\\'")
     return message
  
-def get_last_date(cursor):
-    query =  "SELECT MAX(date) FROM wiki_pages_revs"
-    cursor.execute(query)
-    return cursor.fetchone()[0]
+def get_last_date(cursor): ##### Change fetch function
+    date_query = cursor.query(func.max(wiki_pages_revs.date).label("max_date"))
+    result = date_query.one()
+    max = result.max_date
+    return max
 
-def create_tables(cursor, con = None):
-    query = "CREATE TABLE IF NOT EXISTS wiki_pages_revs (" + \
-           "id int(11) NOT NULL AUTO_INCREMENT," + \
-           "rev_id int," + \
-           "page_id int," + \
-           "user VARCHAR(255) NOT NULL," + \
-           "date DATETIME NOT NULL," + \
-           "comment TEXT," + \
-           "PRIMARY KEY (id)" + \
-           ") ENGINE=MyISAM DEFAULT CHARSET=utf8"
-    cursor.execute(query)
-
-    query = "CREATE TABLE IF NOT EXISTS wiki_pages (" + \
-           "page_id int(11)," + \
-           "namespace smallint," + \
-           "title VARCHAR(255) NOT NULL," + \
-           "PRIMARY KEY (page_id)" + \
-           ") ENGINE=MyISAM DEFAULT CHARSET=utf8"
-    cursor.execute(query)
-
-    query = "CREATE TABLE IF NOT EXISTS people (" + \
-           "id int(11) NOT NULL AUTO_INCREMENT," + \
-           "name VARCHAR(255) NOT NULL," + \
-           "PRIMARY KEY (id)" + \
-           ") ENGINE=MyISAM DEFAULT CHARSET=utf8"
-    cursor.execute(query)
-    return
-
-
-def insert_page(cursor, pageid, namespace, title):
-    q = "INSERT INTO wiki_pages (page_id, namespace, title) ";
-    q += "VALUES (%s, %s, %s)"
+def insert_page(cursor, pageid, namespace, title):  ##### Change insert function
     try:
-        cursor.execute(q, (pageid, namespace, title))
+        cursor.add(wiki_pages(page_id = pageid, namespace = namespace, title = title))
+        cursor.commit()
     except:
-        print (pageid+" "+ namespace + " " + title+" was already in the db")
+        print (pageid+" "+namespace+" "+title.decode('utf-8')+"  was already in the db")
 
-def insert_revision(cursor, pageid, revid, user, date, comment):
-    q = "INSERT INTO wiki_pages_revs (page_id,rev_id,date,user,comment) ";
-    q += "VALUES (%s, %s, %s, %s, %s)"
+def insert_revision(cursor, pageid, revid, user, date, comment):  #### Change insert function
+
     try:
-        cursor.execute(q, (pageid,revid,date,user,comment))
+        cursor.add(wiki_pages_revs(id = pageid,rev_id = revid, date = date, user = user, comment = comment))
+        cursor.commit()
     except:
         print (pageid+" "+revid+" "+ user +" was already in the db")
 
@@ -266,7 +231,7 @@ def process_all_namespace(cursor, namespace):
         xmlpages = parseString(pages_list)
         apcontinue = process_pages(cursor, xmlpages, last_date)
         count_pages += len(xmlpages.getElementsByTagName('p'))
-    con.commit()
+
 
     # print("Total revisions: %s" % (count_revs))
     print("Total ns %s pages: %s"  % (namespace, count_pages))
@@ -303,12 +268,17 @@ if __name__ == '__main__':
     opts = None
     opts = read_options()
 
-    con = open_database(opts.dbuser, opts.dbpassword, opts.dbname)
-    cursor = con.cursor()
-    create_tables(cursor)
+    options = """mysql://%s:%s@localhost/%s?charset=utf8""" % (opts.dbuser, opts.dbpassword, opts.dbname)
+    engine = create_engine(options, encoding = 'utf-8')
+    Session = sessionmaker(bind=engine)
+    cursor = Session()
+
+    Base.metadata.create_all(engine)
+
+    cursor.commit()
+
     # Incremental support
     last_date = get_last_date(cursor)
-
     if opts.backend == "mediawiki":
         if (last_date):
             last_date = last_date.strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -321,5 +291,4 @@ if __name__ == '__main__':
     else:
         raise("Backend not supported " + opts.backend)
 
-    close_database(con)
     sys.exit(0)
